@@ -30,6 +30,9 @@ android.ndk_api = 24
 android.archs = arm64-v8a, armeabi-v7a
 android.allow_backup = True
 
+# Obrigatorio em CI: sem isso o build trava esperando voce digitar "y"
+android.accept_sdk_license = True
+
 # Jogo offline: nenhuma permissao necessaria.
 # android.permissions = INTERNET
 
