@@ -36,6 +36,15 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           pip install buildozer==1.5.0 cython==0.29.36
 
+      - name: Aceitar as licencas do Android SDK
+        run: |
+          SDK="$HOME/.buildozer/android/platform/android-sdk"
+          mkdir -p "$SDK/licenses"
+          printf '\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n' > "$SDK/licenses/android-sdk-license"
+          printf '\n84831b9409646a918e30573bab4c9c91346d8abd\n' > "$SDK/licenses/android-sdk-preview-license"
+          printf '\n859f317696f67ef3d7f30a50a5560e7834b43903\n' > "$SDK/licenses/android-sdk-arm-dbt-license"
+          ls -la "$SDK/licenses"
+
       - name: Cache do SDK/NDK
         uses: actions/cache@v4
         with:
@@ -47,7 +56,44 @@ jobs:
             buildozer-${{ runner.os }}-
 
       - name: Compilar o APK
-        run: buildozer -v android debug
+        run: |
+          set +e
+          buildozer -v android debug
+          STATUS=$?
+          set -e
+
+          if [ $STATUS -eq 0 ]; then
+            exit 0
+          fi
+
+          echo "=============================================="
+          echo "Primeira tentativa falhou. Verificando o aidl."
+          echo "=============================================="
+
+          SDK="$HOME/.buildozer/android/platform/android-sdk"
+          SDKMANAGER="$SDK/tools/bin/sdkmanager"
+
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "sdkmanager nao encontrado: a falha nao foi de SDK."
+            exit $STATUS
+          fi
+
+          yes | "$SDKMANAGER" --sdk_root="$SDK" "build-tools;33.0.2" || true
+
+          NEWEST=$(ls "$SDK/build-tools" | sort -V | tail -1)
+          echo "build-tools mais recente instalada: $NEWEST"
+
+          if [ ! -f "$SDK/build-tools/$NEWEST/aidl" ]; then
+            SRC=$(find "$SDK/build-tools" -name aidl -type f | head -1)
+            if [ -n "$SRC" ]; then
+              echo "Copiando aidl de $SRC para a pasta $NEWEST"
+              cp "$SRC" "$SDK/build-tools/$NEWEST/aidl"
+              chmod +x "$SDK/build-tools/$NEWEST/aidl"
+            fi
+          fi
+
+          echo "Segunda tentativa de build."
+          buildozer -v android debug
 
       - name: Publicar o APK como artefato
         uses: actions/upload-artifact@v4
