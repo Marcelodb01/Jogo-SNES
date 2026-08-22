@@ -36,64 +36,86 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           pip install buildozer==1.5.0 cython==0.29.36
 
-      - name: Aceitar as licencas do Android SDK
-        run: |
-          SDK="$HOME/.buildozer/android/platform/android-sdk"
-          mkdir -p "$SDK/licenses"
-          printf '\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n' > "$SDK/licenses/android-sdk-license"
-          printf '\n84831b9409646a918e30573bab4c9c91346d8abd\n' > "$SDK/licenses/android-sdk-preview-license"
-          printf '\n859f317696f67ef3d7f30a50a5560e7834b43903\n' > "$SDK/licenses/android-sdk-arm-dbt-license"
-          ls -la "$SDK/licenses"
-
       - name: Cache do SDK/NDK
         uses: actions/cache@v4
         with:
           path: |
             ~/.buildozer
             .buildozer
-          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-v4-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            buildozer-${{ runner.os }}-
+            buildozer-v4-${{ runner.os }}-
+
+      - name: Limpar SDK incompleto
+        run: |
+          SDK="$HOME/.buildozer/android/platform/android-sdk"
+          if [ -d "$SDK" ] && [ ! -x "$SDK/tools/bin/sdkmanager" ]; then
+            echo "SDK existe mas nao tem sdkmanager: removendo para o Buildozer baixar do zero."
+            rm -rf "$SDK"
+          fi
 
       - name: Compilar o APK
+        shell: bash
         run: |
-          set +e
-          buildozer -v android debug
-          STATUS=$?
-          set -e
-
-          if [ $STATUS -eq 0 ]; then
-            exit 0
-          fi
-
-          echo "=============================================="
-          echo "Primeira tentativa falhou. Verificando o aidl."
-          echo "=============================================="
-
           SDK="$HOME/.buildozer/android/platform/android-sdk"
-          SDKMANAGER="$SDK/tools/bin/sdkmanager"
 
-          if [ ! -x "$SDKMANAGER" ]; then
-            echo "sdkmanager nao encontrado: a falha nao foi de SDK."
-            exit $STATUS
-          fi
+          escrever_licencas() {
+            [ -d "$SDK" ] || return 0
+            mkdir -p "$SDK/licenses"
+            printf '\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n' > "$SDK/licenses/android-sdk-license"
+            printf '\n84831b9409646a918e30573bab4c9c91346d8abd\n' > "$SDK/licenses/android-sdk-preview-license"
+            printf '\n859f317696f67ef3d7f30a50a5560e7834b43903\n' > "$SDK/licenses/android-sdk-arm-dbt-license"
+            echo ">>> licencas escritas em $SDK/licenses"
+          }
 
-          yes | "$SDKMANAGER" --sdk_root="$SDK" "build-tools;33.0.2" || true
-
-          NEWEST=$(ls "$SDK/build-tools" | sort -V | tail -1)
-          echo "build-tools mais recente instalada: $NEWEST"
-
-          if [ ! -f "$SDK/build-tools/$NEWEST/aidl" ]; then
-            SRC=$(find "$SDK/build-tools" -name aidl -type f | head -1)
-            if [ -n "$SRC" ]; then
-              echo "Copiando aidl de $SRC para a pasta $NEWEST"
-              cp "$SRC" "$SDK/build-tools/$NEWEST/aidl"
-              chmod +x "$SDK/build-tools/$NEWEST/aidl"
+          corrigir_sdk() {
+            escrever_licencas
+            SM="$SDK/tools/bin/sdkmanager"
+            if [ ! -x "$SM" ]; then
+              echo ">>> sdkmanager ainda nao existe; nada a corrigir nesta rodada."
+              return 0
             fi
-          fi
+            yes | "$SM" --sdk_root="$SDK" "platform-tools" "build-tools;33.0.2" > /dev/null 2>&1 || true
+            BT="$SDK/build-tools"
+            [ -d "$BT" ] || return 0
+            NEWEST=$(ls "$BT" | sort -V | tail -1)
+            echo ">>> build-tools mais recente: $NEWEST"
+            if [ ! -f "$BT/$NEWEST/aidl" ]; then
+              SRC=$(find "$BT" -name aidl -type f | head -1)
+              if [ -n "$SRC" ]; then
+                echo ">>> copiando aidl de $SRC"
+                cp "$SRC" "$BT/$NEWEST/aidl"
+                chmod +x "$BT/$NEWEST/aidl"
+              fi
+            fi
+          }
 
-          echo "Segunda tentativa de build."
-          buildozer -v android debug
+          for TENTATIVA in 1 2 3; do
+            echo "=============================================="
+            echo "TENTATIVA $TENTATIVA"
+            echo "=============================================="
+
+            set +e
+            buildozer -v android debug 2>&1 | tee build.log
+            STATUS=${PIPESTATUS[0]}
+            set -e
+
+            if [ $STATUS -eq 0 ]; then
+              echo ">>> Build concluido com sucesso."
+              exit 0
+            fi
+
+            if grep -qE "Aidl not found|Aidl cannot be executed|license is not accepted|sdkmanager is not ?installed|does not exist, sdkmanager" build.log; then
+              echo ">>> Falha de SDK detectada. Aplicando correcao e tentando de novo."
+              corrigir_sdk
+            else
+              echo ">>> Falha NAO relacionada ao SDK. Parando aqui."
+              exit $STATUS
+            fi
+          done
+
+          echo ">>> Esgotadas as 3 tentativas."
+          exit 1
 
       - name: Publicar o APK como artefato
         uses: actions/upload-artifact@v4
