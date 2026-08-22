@@ -27,7 +27,7 @@ fullscreen = 1
 android.api = 34
 android.minapi = 24
 android.ndk_api = 24
-android.archs = arm64-v8a, armeabi-v7a
+android.archs = arm64-v8a
 android.allow_backup = True
 
 # Obrigatorio em CI: sem isso o build trava esperando voce digitar "y"
