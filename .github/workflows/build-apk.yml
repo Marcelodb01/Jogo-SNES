@@ -50,9 +50,38 @@ jobs:
         run: |
           SDK="$HOME/.buildozer/android/platform/android-sdk"
           if [ -d "$SDK" ] && [ ! -x "$SDK/tools/bin/sdkmanager" ]; then
-            echo "SDK existe mas nao tem sdkmanager: removendo para o Buildozer baixar do zero."
+            echo "SDK sem sdkmanager: removendo para baixar do zero."
             rm -rf "$SDK"
           fi
+
+      - name: Plantar OpenSSL no cache do p4a
+        shell: bash
+        run: |
+          VER="3.3.1"
+          TARBALL="openssl-$VER.tar.gz"
+          SHA="777cd596284c883375a2a7a11bf5d2786fc5413255efab20c50d6ffe6d020b7e"
+          TMP="$RUNNER_TEMP/$TARBALL"
+
+          echo ">>> openssl.org devolve HTTP 500; usando o espelho oficial no GitHub."
+          curl -fL --retry 3 --retry-delay 2 -o "$TMP" \
+            "https://github.com/openssl/openssl/releases/download/openssl-$VER/$TARBALL"
+
+          echo "$SHA  $TMP" | sha256sum -c -
+          echo ">>> integridade confirmada."
+
+          for D in build-arm64-v8a build-armeabi-v7a build-arm64-v8a_armeabi-v7a; do
+            DEST="$GITHUB_WORKSPACE/.buildozer/android/platform/$D/packages/openssl"
+            mkdir -p "$DEST"
+            cp "$TMP" "$DEST/$TARBALL"
+            touch "$DEST/.mark-$TARBALL"
+          done
+
+          ALT="$HOME/.buildozer/android/packages/openssl"
+          mkdir -p "$ALT"
+          cp "$TMP" "$ALT/$TARBALL"
+          touch "$ALT/.mark-$TARBALL"
+
+          echo ">>> tarball plantado nas pastas de pacotes."
 
       - name: Compilar o APK
         shell: bash
@@ -65,28 +94,20 @@ jobs:
             printf '\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n' > "$SDK/licenses/android-sdk-license"
             printf '\n84831b9409646a918e30573bab4c9c91346d8abd\n' > "$SDK/licenses/android-sdk-preview-license"
             printf '\n859f317696f67ef3d7f30a50a5560e7834b43903\n' > "$SDK/licenses/android-sdk-arm-dbt-license"
-            echo ">>> licencas escritas em $SDK/licenses"
+            echo ">>> licencas escritas."
           }
 
           corrigir_sdk() {
             escrever_licencas
             SM="$SDK/tools/bin/sdkmanager"
-            if [ ! -x "$SM" ]; then
-              echo ">>> sdkmanager ainda nao existe; nada a corrigir nesta rodada."
-              return 0
-            fi
+            [ -x "$SM" ] || { echo ">>> sdkmanager ainda nao existe."; return 0; }
             yes | "$SM" --sdk_root="$SDK" "platform-tools" "build-tools;33.0.2" > /dev/null 2>&1 || true
             BT="$SDK/build-tools"
             [ -d "$BT" ] || return 0
             NEWEST=$(ls "$BT" | sort -V | tail -1)
-            echo ">>> build-tools mais recente: $NEWEST"
             if [ ! -f "$BT/$NEWEST/aidl" ]; then
               SRC=$(find "$BT" -name aidl -type f | head -1)
-              if [ -n "$SRC" ]; then
-                echo ">>> copiando aidl de $SRC"
-                cp "$SRC" "$BT/$NEWEST/aidl"
-                chmod +x "$BT/$NEWEST/aidl"
-              fi
+              [ -n "$SRC" ] && cp "$SRC" "$BT/$NEWEST/aidl" && chmod +x "$BT/$NEWEST/aidl"
             fi
           }
 
@@ -106,12 +127,19 @@ jobs:
             fi
 
             if grep -qE "Aidl not found|Aidl cannot be executed|license is not accepted|sdkmanager is not ?installed|does not exist, sdkmanager" build.log; then
-              echo ">>> Falha de SDK detectada. Aplicando correcao e tentando de novo."
+              echo ">>> Falha de SDK. Corrigindo e repetindo."
               corrigir_sdk
-            else
-              echo ">>> Falha NAO relacionada ao SDK. Parando aqui."
-              exit $STATUS
+              continue
             fi
+
+            if grep -qE "HTTPError|Download failed|URLError|Connection reset|timed out" build.log; then
+              echo ">>> Falha de rede ao baixar fontes. Repetindo."
+              sleep 15
+              continue
+            fi
+
+            echo ">>> Falha de compilacao. Parando aqui."
+            exit $STATUS
           done
 
           echo ">>> Esgotadas as 3 tentativas."
