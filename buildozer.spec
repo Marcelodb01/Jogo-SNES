@@ -26,11 +26,11 @@ fullscreen = 1
 
 # ---------------------------------------------------------------
 # ATENCAO: as opcoes android.* e p4a.* ficam AQUI, dentro de [app].
-# Se forem postas em secoes [android] ou [p4a], o buildozer IGNORA.
-# ---------------------------------------------------------------
+# Se forem postas em secoes [android] ou [
 
 android.api = 34
-android.minapi = 24
+android.minapi = 24p4a], o buildozer IGNORA.
+# ---------------------------------------------------------------
 android.ndk_api = 24
 
 # Uma arquitetura so enquanto testamos: corta o tempo pela metade.
@@ -47,8 +47,10 @@ android.accept_sdk_license = True
 
 android.logcat_filters = *:S python:D
 
-# O Kivy 3.x usa SDL3; o buildozer assume sdl2 por padrao.
-p4a.bootstrap = sdl3
+# O p4a compilou o Kivy 2.3.1, que e da geracao do SDL2. Forcar sdl3
+# compila, mas o app fecha ao abrir a janela. sdl2 e a combinacao que
+# o proprio p4a testa com essa versao do Kivy.
+p4a.bootstrap = sdl2
 
 [buildozer]
 
