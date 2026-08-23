@@ -15,7 +15,11 @@ version = 0.1
 # SEM fixar a versao do kivy: o p4a usa a versao que ele proprio testa
 # junto com o Python que constroi. Fixar kivy==2.3.0 quebrava o build,
 # porque essa versao nao compila contra Python 3.14.
-requirements = python3,kivy
+# O charset-normalizer 3.x publica wheels compilados especificos de
+# plataforma; o p4a baixa o do Android e tenta instalar no PC, e o pip
+# recusa. A serie 2.x e Python puro (um wheel unico que serve em tudo).
+# O requests aceita qualquer versao >=2 e <4, entao isso e seguro.
+requirements = python3,kivy,charset-normalizer==2.0.12
 
 orientation = landscape
 fullscreen = 1
