@@ -54,6 +54,20 @@ jobs:
             rm -rf "$SDK"
           fi
 
+      - name: Preparar o p4a com a correcao de wheels
+        shell: bash
+        run: |
+          P4A="$GITHUB_WORKSPACE/.buildozer/android/platform/python-for-android"
+          if [ ! -d "$P4A/.git" ]; then
+            echo ">>> clonando o p4a"
+            mkdir -p "$(dirname "$P4A")"
+            git clone -b master --single-branch \
+              https://github.com/kivy/python-for-android.git "$P4A"
+          else
+            echo ">>> p4a ja presente (veio do cache)"
+          fi
+          python3 patch_p4a.py "$P4A"
+
       - name: Compilar o APK
         shell: bash
         run: |
