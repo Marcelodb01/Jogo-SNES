@@ -54,6 +54,15 @@ jobs:
             rm -rf "$SDK"
           fi
 
+      - name: Descartar distribuicao antiga (troca de bootstrap)
+        shell: bash
+        run: |
+          # A "dist" guarda o bootstrap usado (sdl2/sdl3). Se ela sobrar do
+          # cache, o p4a reaproveita a montagem errada. Apagar so a dist e
+          # barato: os recipes compilados continuam no cache.
+          rm -rf "$GITHUB_WORKSPACE"/.buildozer/android/platform/build-*/dists
+          echo ">>> dists removidas"
+
       - name: Preparar o p4a com a correcao de wheels
         shell: bash
         run: |
