@@ -107,11 +107,17 @@ jobs:
 
           if [ $STATUS -ne 0 ]; then
             echo ""
+            # O buildozer despeja um bloco enorme de variaveis de ambiente
+            # no fim do log. Cortamos ele para que o erro real apareca.
+            sed '/# ENVIRONMENT:/,$d' build.log > erro.log
             echo "########################################################"
-            echo "#   ULTIMAS 120 LINHAS DO LOG - O ERRO ESTA AQUI       #"
+            echo "#   FIM DO LOG SEM O BLOCO DE AMBIENTE - ERRO AQUI     #"
             echo "########################################################"
-            tail -120 build.log
+            tail -150 erro.log
             echo "########################################################"
+            echo "#   LINHAS COM 'error' / 'Error' NO LOG INTEIRO        #"
+            echo "########################################################"
+            grep -nE "error:|Error:|ERROR|Traceback|Command failed" build.log | tail -40
             exit $STATUS
           fi
 
