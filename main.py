@@ -8,6 +8,7 @@ Android:  metade esquerda da tela = analogico virtual, direita = botao de ataque
 """
 
 import math
+import traceback
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -101,6 +102,7 @@ class Game(Widget):
                          color=(1, 1, 1, 0.85))
         self.add_widget(self.msg)
 
+        self.crashed = False
         self.joy_origin = None     # (x, y) em pixels
         self.joy_pos = None
         self.joy_touch = None
@@ -244,6 +246,21 @@ class Game(Widget):
 
     # ------------------------------------------------------------- loop
     def update(self, dt):
+        """Envolve o quadro num try/except: se algo estourar, o erro
+        aparece NA TELA do celular em vez do app simplesmente fechar."""
+        try:
+            self._update(dt)
+        except Exception:
+            texto = traceback.format_exc()
+            print("ERRO NO JOGO:\n" + texto)      # vai para o logcat
+            linhas = [l for l in texto.strip().split("\n") if l.strip()]
+            self.msg.text = "ERRO:\n" + "\n".join(linhas[-4:])
+            self.msg.font_size = "12sp"
+            self.msg.pos = (self.x, self.y + self.height * 0.35)
+            self.crashed = True
+            return False   # para o relogio: nao tenta de novo
+
+    def _update(self, dt):
         if not hasattr(self, "tile"):
             self._relayout()
         dt = min(dt, 1.0 / 30.0)
