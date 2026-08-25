@@ -19,6 +19,7 @@ from kivy.core.window import Window
 from kivy.graphics import (Color, Ellipse, Line, PopMatrix, PushMatrix,
                            Rectangle, Rotate, Translate)
 from kivy.graphics.fbo import Fbo
+from kivy.graphics.instructions import Canvas
 from kivy.graphics import ClearBuffers, ClearColor
 from kivy.graphics.texture import Texture
 from kivy.uix.label import Label
@@ -375,6 +376,7 @@ class Jogo(Widget):
         self.push_dir = None
 
         self.carregar(0)
+        self._montar_camadas()
 
         Window.bind(on_key_down=self._tecla_desce, on_key_up=self._tecla_sobe)
         self.bind(size=self._relayout, pos=self._relayout)
@@ -828,9 +830,7 @@ def _relayout(self, *_):
 def _rect(self, x, y, w, h):
     """Retangulo em coordenadas do jogo (y para baixo) -> tela do Kivy."""
     s = self.escala
-    return ((self.ox + self._tx + x * s,
-             self.oy + self._ty + (H - y - h) * s),
-            (w * s, h * s))
+    return ((self.ox + x * s, self.oy + (H - y - h) * s), (w * s, h * s))
 
 
 def _cor_rect(self, cor, x, y, w, h):
@@ -994,30 +994,67 @@ def pintar_cenario(self):
 
 
 # ------------------------------------------------------------- quadro
+def _montar_camadas(self):
+    """Tres camadas: estatica (refeita so quando muda), dinamica (por
+    quadro) e interface. Evita reconstruir ~100 instrucoes 60x por
+    segundo, que era o gargalo."""
+    self.c_est = Canvas()
+    self.c_din = Canvas()
+    self.c_ui = Canvas()
+    self.canvas.before.add(PushMatrix())
+    self.tr_tremor = Translate(0, 0, 0)
+    self.canvas.before.add(self.tr_tremor)
+    self.canvas.before.add(self.c_est)
+    self.canvas.before.add(self.c_din)
+    self.c_luz = Canvas()
+    self.canvas.before.add(self.c_luz)
+    self.canvas.before.add(PopMatrix())
+    self.canvas.before.add(self.c_ui)
+    self._assin_est = None
+
+
+def _assinatura_estatica(self):
+    """Muda quando algo da camada estatica precisa ser repintado."""
+    return (self.sala_idx, self.porta_aberta, round(self.escala, 3),
+            round(self.ox, 1), round(self.oy, 1),
+            tuple(any(b.c == c and b.r == r and b.mov is None
+                      for b in self.blocos) for c, r in self.placas))
+
+
 def desenhar(self):
     if not self.escala:
         return
     if self.cenario_sujo or self.tex_cenario is None:
         self.pintar_cenario()
+        self._assin_est = None
 
-    # tremor de impacto: desloca a cena, nao a interface
+    # --- camada estatica: so quando algo realmente mudou ---
+    assin = self._assinatura_estatica()
+    if assin != self._assin_est:
+        self._assin_est = assin
+        self.c_est.clear()
+        with self.c_est:
+            Color(0.07, 0.066, 0.10, 1)
+            Rectangle(pos=self.pos, size=self.size)
+            Color(1, 1, 1, 1)
+            pos, size = self._rect(0, 0, W, H)
+            Rectangle(texture=self.tex_cenario, pos=pos, size=size)
+            self._desenhar_placas()
+            self._desenhar_portas()
+        self.c_luz.clear()
+        with self.c_luz:
+            self._desenhar_halos()
+
+    # --- tremor: desloca as camadas do mundo, nao a interface ---
     if self.tremor > 0.06:
-        self._tx = round((random.random() - 0.5) * self.tremor) * self.escala
-        self._ty = round((random.random() - 0.5) * self.tremor) * self.escala
-    else:
-        self._tx = self._ty = 0.0
+        self.tr_tremor.x = round((random.random() - 0.5) * self.tremor) * self.escala
+        self.tr_tremor.y = round((random.random() - 0.5) * self.tremor) * self.escala
+    elif self.tr_tremor.x or self.tr_tremor.y:
+        self.tr_tremor.x = self.tr_tremor.y = 0
 
-    self.canvas.before.clear()
-    with self.canvas.before:
-        Color(0.07, 0.066, 0.10, 1)
-        Rectangle(pos=self.pos, size=self.size)
-
-        Color(1, 1, 1, 1)
-        pos, size = self._rect(0, 0, W, H)
-        Rectangle(texture=self.tex_cenario, pos=pos, size=size)
-
-        self._desenhar_placas()
-        self._desenhar_portas()
+    # --- camada dinamica ---
+    self.c_din.clear()
+    with self.c_din:
         self._desenhar_blocos()
         self._desenhar_nucleo()
         self._desenhar_inimigos()
@@ -1025,10 +1062,12 @@ def desenhar(self):
         self._desenhar_faiscas()
         self._desenhar_tochas()
 
+    # --- interface: vinheta, vitalidade e controles ---
+    self.c_ui.clear()
+    with self.c_ui:
         Color(1, 1, 1, 1)
         pos, size = self._rect(0, 0, W, H)
         Rectangle(texture=self.tex_vinheta, pos=pos, size=size)
-
         self._desenhar_hud()
         self._desenhar_controles()
 
@@ -1161,8 +1200,8 @@ def _desenhar_espada(self, x, cy):
     a1 = math.degrees(min(ini, ang)) + 90
     a2 = math.degrees(max(ini, ang)) + 90
     s = self.escala
-    cx_s = self.ox + self._tx + x * s
-    cy_s = self.oy + self._ty + (H - cy) * s
+    cx_s = self.ox + x * s
+    cy_s = self.oy + (H - cy) * s
 
     Color(*hexa('#F2D9A0', 0.22 * (1 - k * 0.7)))
     Line(circle=(cx_s, cy_s, 14 * s, a1, a2), width=max(1.0, 3.5 * s))
@@ -1193,18 +1232,22 @@ def _desenhar_faiscas(self):
 
 
 def _desenhar_tochas(self):
+    """So a chama: retangulos pequenos, baratos de refazer por quadro."""
     p = Clock.get_boottime()
     for tx, ty, fase in self.tochas:
         s1 = math.sin(p * 9 + fase) + math.sin(p * 23.7 + fase * 2) * 0.4
-        alt = 5 + round(s1 * 0.9)
-        lat = round(math.sin(p * 13 + fase) * 1.2)
+        alt = 5 + int(round(s1 * 0.9))
+        lat = int(round(math.sin(p * 13 + fase) * 1.2))
         self._cor_rect(hexa('#8A3A18'), tx - 2 + lat, ty - alt, 4, alt + 2)
         self._cor_rect(hexa('#E07A22'), tx - 1 + lat, ty - alt + 1, 2, alt)
         self._cor_rect(hexa('#F2D9A0'), tx + lat, ty - alt + 3, 1, 2)
-    # halo quente por cima da cena
+
+
+def _desenhar_halos(self):
+    """Luz quente das tochas. Vai numa camada propria porque a posicao
+    nunca muda: refazer isso a cada quadro custava caro na GPU."""
     for tx, ty, fase in self.tochas:
-        fl = 0.86 + math.sin(p * 7 + fase) * 0.09 + math.sin(p * 19 + fase) * 0.05
-        raio = 48 * fl
+        raio = 46
         Color(1, 1, 1, 1)
         pos, size = self._rect(tx - raio, ty - raio, raio * 2, raio * 2)
         Rectangle(texture=self.tex_luz, pos=pos, size=size)
@@ -1323,6 +1366,8 @@ def _tecla_sobe(self, window, key, *args):
 # ------------------------------------------------------------- anexar
 for _nome in (
         '_relayout',
+        '_montar_camadas',
+        '_assinatura_estatica',
         '_rect',
         '_cor_rect',
         '_sprite',
@@ -1341,6 +1386,7 @@ for _nome in (
         '_desenhar_espada',
         '_desenhar_faiscas',
         '_desenhar_tochas',
+        '_desenhar_halos',
         '_desenhar_hud',
         '_desenhar_controles',
         '_areas_botoes',
