@@ -42,9 +42,9 @@ jobs:
           path: |
             ~/.buildozer
             .buildozer
-          key: buildozer-v4-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-v5-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            buildozer-v4-${{ runner.os }}-
+            buildozer-v5-${{ runner.os }}-
 
       - name: Limpar SDK incompleto
         run: |
@@ -72,15 +72,34 @@ jobs:
         shell: bash
         run: |
           P4A="$GITHUB_WORKSPACE/.buildozer/android/platform/python-for-android"
-          if [ ! -d "$P4A/.git" ]; then
-            echo ">>> clonando o p4a"
-            mkdir -p "$(dirname "$P4A")"
-            git clone -b master --single-branch \
-              https://github.com/kivy/python-for-android.git "$P4A"
-          else
-            echo ">>> p4a ja presente (veio do cache)"
+
+          # le a branch/tag do proprio buildozer.spec
+          BRANCH=$(grep -E '^p4a.branch' buildozer.spec | cut -d '=' -f2 | tr -d ' ')
+          BRANCH=${BRANCH:-master}
+          echo ">>> branch do p4a: $BRANCH"
+
+          # se o clone em cache for de outra branch, descarta
+          if [ -d "$P4A/.git" ]; then
+            ATUAL=$(git -C "$P4A" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "?")
+            if [ "$ATUAL" != "$BRANCH" ]; then
+              echo ">>> clone em cache e de '$ATUAL', descartando"
+              rm -rf "$P4A"
+            fi
           fi
-          python3 patch_p4a.py "$P4A"
+
+          if [ ! -d "$P4A/.git" ]; then
+            mkdir -p "$(dirname "$P4A")"
+            git clone -b "$BRANCH" --single-branch \
+              https://github.com/kivy/python-for-android.git "$P4A"
+          fi
+
+          # o bug dos wheels so existe no p4a novo. Nas versoes fixadas
+          # antigas o patch nao e necessario e pode atrapalhar.
+          if [ "$BRANCH" = "master" ]; then
+            python3 patch_p4a.py "$P4A" || echo ">>> patch nao se aplica, seguindo"
+          else
+            echo ">>> versao fixada ($BRANCH): patch dispensado"
+          fi
 
       - name: Compilar o APK
         shell: bash
