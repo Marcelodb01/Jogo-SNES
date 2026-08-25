@@ -54,7 +54,7 @@ jobs:
             rm -rf "$SDK"
           fi
 
-      - name: Descartar distribuicao antiga (troca de bootstrap)
+      - name: Descartar dist e venv reaproveitados do cache
         shell: bash
         run: |
           # A "dist" guarda o bootstrap usado (sdl2/sdl3). Se ela sobrar do
@@ -62,6 +62,11 @@ jobs:
           # barato: os recipes compilados continuam no cache.
           rm -rf "$GITHUB_WORKSPACE"/.buildozer/android/platform/build-*/dists
           echo ">>> dists removidas"
+
+          # O venv guarda um pip que pode ficar meio atualizado entre
+          # execucoes e quebrar com ImportError. Recria-lo custa segundos.
+          rm -rf "$GITHUB_WORKSPACE"/.buildozer/android/platform/build-*/build/venv
+          echo ">>> venv removido"
 
       - name: Preparar o p4a com a correcao de wheels
         shell: bash
